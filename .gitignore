@@ -1,2 +1,4 @@
 .vscode
 *.db
+__pycache__
+cache

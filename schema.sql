@@ -3,7 +3,7 @@
 CREATE TABLE circuits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    rotation INTEGER NOT NULL
+    rotation FLOAT NOT NULL
 );
 
 CREATE TABLE corners (
@@ -45,7 +45,7 @@ CREATE TABLE marshal_sectors (
 -- DRIVER & TEAM INFO --
 
 CREATE TABLE drivers (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     broadcast_name TEXT,
     driver_number INTEGER NOT NULL,
@@ -56,20 +56,30 @@ CREATE TABLE drivers (
 );
 
 CREATE TABLE teams (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     color TEXT NOT NULL
 );
 
 -- SESSION & RESULTS --
 
+create TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_name TEXT,
+    session_name TEXT,
+    date DATETIME,
+    circuit_id INTEGER,
+    FOREIGN KEY (circuit_id) REFERENCES circuits(id)
+);
+
 CREATE TABLE results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     driver_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
+    session_id INTEGER NOT NULL,
     position INTEGER,
-    classifies_position TEXT,
-    grid_position TEXT,
+    classified_position INTEGER,
+    grid_position INTEGER,
     q1 DATETIME,
     q2 DATETIME,
     q3 DATETIME,
@@ -78,18 +88,8 @@ CREATE TABLE results (
     points INTEGER NOT NULL,
     laps INTEGER,
     FOREIGN KEY (driver_id) REFERENCES drivers(id),
-    FOREIGN KEY (team_id) REFERENCES teams(id)
-);
-
-create TABLE sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_name TEXT,
-    session_name TEXT,
-    date DATETIME,
-    circuit_id INTEGER,
-    result_id INTEGER,
-    FOREIGN KEY (circuit_id) REFERENCES circuits(id),
-    FOREIGN KEY (result_id) REFERENCES results(id)
+    FOREIGN KEY (team_id) REFERENCES teams(id),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
 CREATE TABLE weather (
@@ -117,10 +117,19 @@ CREATE TABLE laps (
     sector1_time DATETIME,
     sector2_time DATETIME,
     sector3_time DATETIME,
+    sector1_session_time DATETIME,
+    sector2_session_time DATETIME,
+    sector3_session_time DATETIME,
     speed1 FLOAT,
     speed2 FLOAT,
     speedFL FLOAT,
+    speedST FLOAT,
+    personal_best BOOLEAN,
     compound TEXT,
+    tyre_life INTEGER,
+    fresh_tyre BOOLEAN,
+    lap_start_time DATETIME,
+    lap_start_date DATETIME,
     track_status TEXT,
     position INTEGER,
     pit_in_time DATETIME,
@@ -130,5 +139,23 @@ CREATE TABLE laps (
 );
 
 CREATE TABLE telemetry (
-    id INTEGER PRIMARY KEY AUTOINCREMENT
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    driver_ahead INTEGER,
+    dist_to_driver_ahead FLOAT,
+    time DATETIME,
+    date DATETIME,
+    rpm FLOAT,
+    speed FLOAT,
+    ngear INTEGER,
+    throttle FLOAT,
+    brake BOOLEAN,
+    drs INTEGER,
+    distance FLOAT,
+    rel_dist FLOAT,
+    status TEXT,
+    X FLOAT,
+    Y FLOAT,
+    Z FLOAT,
+    lap_id INTEGER,
+    FOREIGN KEY (lap_id) REFERENCES laps(id)
 );
