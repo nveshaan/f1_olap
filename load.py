@@ -192,7 +192,17 @@ def load_results(session, session_id, db):
 def load_weather_data(session, session_id, db):
     """Load weather data for the session."""
     try:
-        weather = session.weather_data
+        # Check if weather_data attribute exists and is available
+        if not hasattr(session, 'weather_data'):
+            print(f"  No weather data available for this session")
+            return
+        
+        try:
+            weather = session.weather_data
+        except (AttributeError, ValueError) as e:
+            print(f"  No weather data available for this session: {e}")
+            return
+            
         if weather is not None and len(weather) > 0:
             cursor = db.cursor()
             for _, w in weather.iterrows():
@@ -214,13 +224,30 @@ def load_weather_data(session, session_id, db):
                 ))
             db.commit()
             print(f"  Loaded {len(weather)} weather records")
+        else:
+            print(f"  No weather records available")
     except Exception as e:
         print(f"  Warning: Could not load weather data: {e}")
 
 
 def load_laps(session, session_id, db):
     """Load lap data for all drivers."""
-    laps = session.laps
+    try:
+        # Check if laps attribute exists and is available
+        if not hasattr(session, 'laps'):
+            print("  No lap data available for this session")
+            return
+        
+        try:
+            laps = session.laps
+        except (AttributeError, ValueError) as e:
+            print(f"  No lap data available for this session: {e}")
+            return
+            
+    except Exception as e:
+        print(f"  Warning: Could not load laps: {e}")
+        return
+        
     if laps is None or len(laps) == 0:
         print("  No lap data available")
         return
@@ -369,9 +396,13 @@ def load_event(year, event, session_num, load_telemetry_data=False):
     """
     print(f"\nLoading {year} {event} - {session_num}")
 
-    # Load the session
-    session = fastf1.get_session(year, event, session_num)
-    session.load()
+    try:
+        # Load the session
+        session = fastf1.get_session(year, event, session_num)
+        session.load(telemetry=load_telemetry_data, messages=False, laps=True, weather=True)
+    except Exception as e:
+        print(f"Error loading session data: {e}")
+        return
 
     db = get_db()
 
@@ -429,13 +460,13 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 if __name__ == '__main__':
     # Initialize database
     init_db()
-    years = range(2018, 2026)
+    years = range(2025, 2026)
     for year in years:
         # Load all events for the year
         schedule = fastf1.get_event_schedule(year)
         for _, event in schedule.iloc[1:].iterrows():
             try:
-                for i in range(1, 6):
+                for i in range(5, 6):
                     load_event(year, event['EventName'], session_num=i, load_telemetry_data=True)
             except Exception as e:
                 print(f"Error loading {year} {event['EventName']}: {e}")
