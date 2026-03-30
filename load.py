@@ -404,7 +404,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
         print(f"Error loading session data: {e}")
         return
 
-    db = get_db(year=str(year)+".db")
+    db = get_db(path=str(year)+".db")
 
     # Load circuit info
     print("Loading circuit info...")
