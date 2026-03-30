@@ -404,7 +404,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
         print(f"Error loading session data: {e}")
         return
 
-    db = get_db()
+    db = get_db(year=str(year)+".db")
 
     # Load circuit info
     print("Loading circuit info...")
@@ -458,11 +458,10 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 
 
 if __name__ == '__main__':
-    # Initialize database
-    init_db()
     years = range(2018, 2026)
     for year in years:
         # Load all events for the year
+        init_db(year=year)
         schedule = fastf1.get_event_schedule(year)
         for _, event in schedule.iloc[1:].iterrows():
             try:
