@@ -460,7 +460,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 if __name__ == '__main__':
     # Initialize database
     init_db()
-    years = range(2025, 2026)
+    years = range(2018, 2026)
     for year in years:
         # Load all events for the year
         schedule = fastf1.get_event_schedule(year)
