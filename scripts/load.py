@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import timedelta
 from tqdm import tqdm
 
-from db import init_db, get_db
+from scripts.db import init_db, get_db
 
 # Enable FastF1 cache for faster loading
 fastf1.Cache.enable_cache('cache')
