@@ -4,3 +4,4 @@ __pycache__
 cache
 .venv
 *.db-journal
+f1_parquet

@@ -1,10 +1,12 @@
 [project]
 name = "f1olap"
 version = "0.1.0"
-description = "Add your description here"
+description = "data warehousing and business intelligence project on f1"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb>=1.5.2",
+    "duckdb-cli>=1.5.1",
     "fastf1>=3.8.1",
     "pandas>=2.3.3",
     "tqdm>=4.67.3",

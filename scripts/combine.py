@@ -25,11 +25,15 @@ def normalize_create_sql(sql: str) -> str:
     if sql is None:
         return None
     # Add IF NOT EXISTS to CREATE TABLE statements
-    return sql.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+    sql = sql.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+    # DuckDB will try to cast DATETIME to TIMESTAMP and fail on ISO 8601 durations (e.g. P0DT...)
+    # Replace DATETIME with VARCHAR to prevent strict type parsing during export
+    sql = sql.replace(" DATETIME", " VARCHAR")
+    return sql
 
 
 # Tables that are common across years and should be deduplicated by a natural key
-COMMON_TABLES = {"circuits", "drivers", "teams"}
+COMMON_TABLES = {"circuits", "drivers", "teams", "corners", "marshal_lights", "marshal_sectors"}
 
 
 def find_existing_id(dest_conn: sqlite3.Connection, table: str, row_vals: dict, pk_col: str):
@@ -59,6 +63,16 @@ def find_existing_id(dest_conn: sqlite3.Connection, table: str, row_vals: dict, 
             num = row_vals.get("driver_number")
             if name and num is not None:
                 r = cur.execute("SELECT id FROM drivers WHERE name = ? AND driver_number = ? LIMIT 1", (name, num)).fetchone()
+                return r[0] if r else None
+        if table in ("corners", "marshal_lights", "marshal_sectors"):
+            cid = row_vals.get("circuit_id")
+            num = row_vals.get("number")
+            letter = row_vals.get("letter")
+            if cid is not None and num is not None:
+                if letter is not None:
+                    r = cur.execute(f"SELECT id FROM {table} WHERE circuit_id = ? AND number = ? AND letter = ? LIMIT 1", (cid, num, letter)).fetchone()
+                else:
+                    r = cur.execute(f"SELECT id FROM {table} WHERE circuit_id = ? AND number = ? AND letter IS NULL LIMIT 1", (cid, num)).fetchone()
                 return r[0] if r else None
     except Exception:
         return None
@@ -185,6 +199,14 @@ def combine_databases(db_files, dest_path="f1.db"):
                     for row in select_rows:
                         row_vals = dict(zip(cols, row))
 
+                        # Remap FK columns to new ids if present FIRST
+                        for fk in fk_map.get(t, []):
+                            from_col = fk["from"]
+                            parent = fk["parent"]
+                            val = row_vals.get(from_col)
+                            if val is not None and val in id_map.get(parent, {}):
+                                row_vals[from_col] = id_map[parent][val]
+
                         # If this is a common table, try to find an existing row in dest and reuse its id
                         if t in COMMON_TABLES and pk_col and row_vals.get(pk_col) is not None:
                             existing = find_existing_id(dest_conn, t, row_vals, pk_col)
@@ -193,14 +215,6 @@ def combine_databases(db_files, dest_path="f1.db"):
                                 update_existing_row(dest_conn, t, existing, row_vals, cols)
                                 id_map[t][row_vals[pk_col]] = existing
                                 continue
-
-                        # Remap FK columns to new ids if present
-                        for fk in fk_map.get(t, []):
-                            from_col = fk["from"]
-                            parent = fk["parent"]
-                            val = row_vals.get(from_col)
-                            if val is not None and val in id_map.get(parent, {}):
-                                row_vals[from_col] = id_map[parent][val]
 
                         # Attempt insert preserving PK if possible, otherwise let dest assign a new id
                         insert_cols = cols.copy()
@@ -308,16 +322,79 @@ def run_self_test():
 def main():
     p = argparse.ArgumentParser(description="Combine year DBs into a single f1.db")
     p.add_argument("--dest", "-d", default="f1.db", help="Destination combined DB path")
+    p.add_argument("--format", "-f", choices=["sqlite", "duckdb", "parquet"], default="sqlite", help="Output database format")
     p.add_argument("--pattern", "-p", default="*.db", help="Glob pattern to find source DBs")
     p.add_argument("--test", action="store_true", help="Run self-test and exit")
     args = p.parse_args()
+
+    if args.format == "duckdb" and args.dest == "f1.db":
+        args.dest = "f1.duckdb"
+    elif args.format == "parquet" and args.dest == "f1.db":
+        args.dest = "f1_parquet"
 
     if args.test:
         run_self_test()
         return
 
     db_files = find_db_files(args.pattern, args.dest)
-    combine_databases(db_files, dest_path=args.dest)
+    
+    if args.format == "sqlite":
+        combine_databases(db_files, dest_path=args.dest)
+    elif args.format in ("duckdb", "parquet"):
+        format_name = "DuckDB" if args.format == "duckdb" else "Parquet"
+        print(f"Combining into {format_name} format at {args.dest}")
+        import tempfile
+        import duckdb
+        fd, temp_sqlite = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            combine_databases(db_files, dest_path=temp_sqlite)
+            print(f"Exporting combined SQLite DB to {format_name} at {args.dest}")
+            if args.format == "duckdb":
+                con = duckdb.connect(args.dest)
+                catalog = con.execute("SELECT current_database()").fetchone()[0]
+                con.execute("INSTALL sqlite;")
+                con.execute("LOAD sqlite;")
+                con.execute("SET sqlite_all_varchar=true;")
+                con.execute(f"ATTACH '{temp_sqlite}' AS sqlite_db (TYPE SQLITE);")
+                con.execute(f"COPY FROM DATABASE sqlite_db TO {catalog};")
+                con.close()
+            else:
+                os.makedirs(args.dest, exist_ok=True)
+                con = duckdb.connect(':memory:')
+                con.execute("INSTALL sqlite;")
+                con.execute("LOAD sqlite;")
+                con.execute("SET sqlite_all_varchar=true;")
+                con.execute(f"ATTACH '{temp_sqlite}' AS sqlite_db (TYPE SQLITE);")
+                con.execute("USE sqlite_db;")
+                con.execute(f"EXPORT DATABASE '{args.dest}' (FORMAT PARQUET);")
+                con.close()
+                
+                # Hugging Face attempts to concatenate all .parquet files in a root directory
+                # into a single table. Move each table to its own subdirectory so HF treats 
+                # them as independent dataset configs.
+                for pq_file in glob.glob(os.path.join(args.dest, "*.parquet")):
+                    filename = os.path.basename(pq_file)
+                    table_name = os.path.splitext(filename)[0]
+                    table_dir = os.path.join(args.dest, table_name)
+                    os.makedirs(table_dir, exist_ok=True)
+                    shutil.move(pq_file, os.path.join(table_dir, filename))
+
+                # Repair load.sql to point at the new subdirectory paths
+                load_sql_path = os.path.join(args.dest, "load.sql")
+                if os.path.exists(load_sql_path):
+                    with open(load_sql_path, "r") as f:
+                        sql_content = f.read()
+                    for table_name in os.listdir(args.dest):
+                        if os.path.isdir(os.path.join(args.dest, table_name)):
+                            sql_content = sql_content.replace(f"'{table_name}.parquet'", f"'{table_name}/{table_name}.parquet'")
+                    with open(load_sql_path, "w") as f:
+                        f.write(sql_content)
+
+            print("Export complete.")
+        finally:
+            if os.path.exists(temp_sqlite):
+                os.remove(temp_sqlite)
 
 
 if __name__ == '__main__':
