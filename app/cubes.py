@@ -59,7 +59,9 @@ def setup_cubes(con):
             EXTRACT('epoch' FROM TRY_CAST(REPLACE(sector3_time, 'days', 'day') AS INTERVAL)) as s3_time,
             TRY_CAST(tyre_life AS INTEGER) as tyre_life, 
             TRY_CAST(personal_best AS BOOLEAN) as is_personal_best,
-            TRY_CAST(lap_number AS INTEGER) as lap_number
+            TRY_CAST(lap_number AS INTEGER) as lap_number,
+            TRY_CAST(position AS INTEGER) as current_position,
+            pit_in_time
         FROM laps;
     """)
 

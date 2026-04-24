@@ -1,7 +1,5 @@
 import fastf1
 import pandas as pd
-from datetime import timedelta
-from tqdm import tqdm
 
 from scripts.db import init_db, get_db
 
@@ -465,7 +463,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 
 
 if __name__ == '__main__':
-    years = [2022]
+    years = range(2018, 2026)
     for year in years:
         # Load all events for the year
         init_db(year=year)
