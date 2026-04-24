@@ -4,7 +4,7 @@ emoji: 🏎️
 colorFrom: red
 colorTo: blue
 sdk: gradio
-app_file: app/dashboard.py
+app_file: app.py
 pinned: false
 ---
 
