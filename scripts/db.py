@@ -12,7 +12,7 @@ def init_db(year, reset=False):
         print("Database already exists. Use reset=True to overwrite.")
         return
 
-    with open('schema.sql') as f:
+    with open('sql/schema.sql') as f:
         if os.path.exists(path=path):
             os.remove(path)
         db = get_db(path)

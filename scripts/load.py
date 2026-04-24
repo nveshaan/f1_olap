@@ -308,7 +308,7 @@ def load_laps(session, session_id, db):
     print(f"  Loaded {count} laps")
 
 
-def load_telemetry(session, driver_abbr, db, sample_rate=1):
+def load_telemetry(session, session_id, driver_abbr, db, sample_rate=1):
     """Load telemetry data for a specific driver (sampled to reduce data size)."""
     try:
         laps = session.laps.pick_drivers(driver_abbr)
@@ -326,13 +326,20 @@ def load_telemetry(session, driver_abbr, db, sample_rate=1):
             # Sample the data to reduce size
             telemetry = telemetry.iloc[::sample_rate]
 
-            # Get lap_id from database
-            cursor.execute(
-                "SELECT id FROM laps WHERE driver_id = (SELECT id FROM drivers WHERE abbrevation = ?) AND lap_number = ?",
-                (driver_abbr, int(lap.get('LapNumber')))
-            )
-            lap_row = cursor.fetchone()
-            lap_id = lap_row[0] if lap_row is not None else None
+            # Get driver_id from drivers table
+            cursor.execute("SELECT id FROM drivers WHERE abbrevation = ?", (driver_abbr,))
+            drv_row = cursor.fetchone()
+            driver_id = drv_row[0] if drv_row is not None else None
+
+            # Get lap_id from database matching driver_id, lap_number and session_id
+            lap_id = None
+            if driver_id is not None:
+                cursor.execute(
+                    "SELECT id FROM laps WHERE driver_id = ? AND lap_number = ? AND session_id = ? LIMIT 1",
+                    (driver_id, int(lap.get('LapNumber')), session_id)
+                )
+                lap_row = cursor.fetchone()
+                lap_id = lap_row[0] if lap_row is not None else None
 
             for _, telem in telemetry.iterrows():
                 # Helper function to safely convert values, handling empty strings
@@ -447,7 +454,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
         cursor.execute("SELECT abbrevation FROM drivers")
         driver_abbrs = [row[0] for row in cursor.fetchall()]
         for driver_abbr in driver_abbrs:
-            count = load_telemetry(session, driver_abbr, db)
+            count = load_telemetry(session, session_id, driver_abbr, db)
             if count > 0:
                 print(f"  Loaded {count} telemetry points for {driver_abbr}")
                 total_telem += count
@@ -458,7 +465,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 
 
 if __name__ == '__main__':
-    years = range(2018, 2026)
+    years = [2024]
     for year in years:
         # Load all events for the year
         init_db(year=year)
