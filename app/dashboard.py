@@ -364,7 +364,6 @@ def predict_pit_strategy(lap_number, tyre_life, track_temp, rainfall, compound, 
     
     try:
         clf_path = os.path.join(MODELS_DIR, "rfc_classifier.pkl")
-        reg_path = os.path.join(MODELS_DIR, "rfr_regressor.pkl")
         # 1. Fetch historical data with 'Strategy Quality' weighting
         # We calculate grid_gain to penalize 'missed opportunities' (starting high, finishing low)
         query = f"""
@@ -424,16 +423,6 @@ def predict_pit_strategy(lap_number, tyre_life, track_temp, rainfall, compound, 
             clf.fit(X, y_clf, sample_weight=sample_weights) # Apply weights here
             joblib.dump(clf, clf_path)
             loaded_clf = False
-
-        # 4. Handle Regressor (Expected Position Gain)
-        if os.path.exists(reg_path):
-            reg = joblib.load(reg_path)
-            loaded_reg = True
-        else:
-            reg = RandomForestRegressor(n_estimators=100, random_state=42)
-            reg.fit(X, y_reg, sample_weight=sample_weights) # Apply weights here
-            joblib.dump(reg, reg_path)
-            loaded_reg = False
         
         # 5. Predict
         input_data = pd.DataFrame([{
@@ -449,9 +438,8 @@ def predict_pit_strategy(lap_number, tyre_life, track_temp, rainfall, compound, 
         X_test = input_data[features].values.astype(float)
         
         prob = clf.predict_proba(X_test)[0][1]
-        expected_gain = reg.predict(X_test)[0]
         
-        status_msg = f" (Opportunity-Weighted Models)" if (loaded_clf and loaded_reg) else f" (Opportunity-Weighted Models)"
+        status_msg = "(Opportunity-Weighted Model)"
         
         if prob > 0.7:
             advice = "🚨 **HIGH CONFIDENCE**: Box this lap! Model reflects aggressive, successful historical strategy."
@@ -459,10 +447,8 @@ def predict_pit_strategy(lap_number, tyre_life, track_temp, rainfall, compound, 
             advice = "⚠️ **MODERATE**: Model suggests monitoring tyres. High-opportunity strategies are mixed here."
         else:
             advice = "✅ **STAY OUT**: Model indicates staying out matches historically optimal gains."
-            
-        gain_msg = f"\n\n📈 **Opportunity-Weighted Gain**: {expected_gain:+.2f} spots (Optimized for success)"
-            
-        return f"{advice} (Score: {prob:.2f}){gain_msg}{status_msg}"
+                        
+        return f"{advice} (Score: {prob:.2f}){status_msg}"
 
         
     except Exception as e:
