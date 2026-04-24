@@ -5,9 +5,13 @@ description = "data warehousing and business intelligence project on f1"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "altair>=6.1.0",
     "duckdb>=1.5.2",
     "duckdb-cli>=1.5.1",
     "fastf1>=3.8.1",
+    "gradio>=6.13.0",
     "pandas>=2.3.3",
+    "plotly>=6.7.0",
+    "scikit-learn>=1.8.0",
     "tqdm>=4.67.3",
 ]
