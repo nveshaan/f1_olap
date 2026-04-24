@@ -4,6 +4,9 @@ import pandas as pd
 from db_manager import get_connection
 from cubes import setup_cubes
 import time
+from sklearn.cluster import KMeans
+from mlxtend.frequent_patterns import fpgrowth, association_rules
+from mlxtend.preprocessing import TransactionEncoder
 
 con = None
 
@@ -157,6 +160,130 @@ def evaluate_olap_query(cube_name, x_axis, y_axis, pivot_col, slice_dim, slice_v
     except Exception as e:
         return None, None, f"❌ Error querying dataframe: {str(e)}"
 
+def run_arm(min_supp, min_conf, target_metric):
+    global con
+    if con is None:
+        return None, "❌ Database not connected!"
+    
+    try:
+        query = """
+            SELECT 
+                l.is_personal_best,
+                l.compound,
+                l.tyre_life,
+                w.rainfall,
+                w.track_temp,
+                r.classified_position,
+                r.points_scored,
+                r.position_gain
+            FROM fact_laps l
+            LEFT JOIN (
+                SELECT session_key, MAX(TRY_CAST(rainfall AS FLOAT)) as rainfall, AVG(TRY_CAST(track_temp AS FLOAT)) as track_temp 
+                FROM dim_weather 
+                GROUP BY session_key
+            ) w ON l.session_key = w.session_key
+            LEFT JOIN fact_race_results r ON l.session_key = r.session_key AND l.driver_key = r.driver_key
+            WHERE l.compound IS NOT NULL AND l.compound != 'UNKNOWN'
+        """
+        df = con.sql(query).df()
+        
+        # Build transactions based on lap features
+        transactions = []
+        for _, row in df.iterrows():
+            t = []
+            t.append(f"Compound: {row['compound']}")
+            
+            if pd.notna(row['tyre_life']):
+                tl = int(row['tyre_life'])
+                if tl < 5: t.append("Tyre_Life: < 5")
+                elif tl <= 15: t.append("Tyre_Life: 5-15")
+                else: t.append("Tyre_Life: > 15")
+                
+            if pd.notna(row['is_personal_best']):
+                t.append(f"Personal Best: {bool(row['is_personal_best'])}")
+                
+            if pd.notna(row['rainfall']):
+                t.append("Rainfall: Yes" if float(row['rainfall']) > 0 else "Rainfall: No")
+                
+            if pd.notna(row['track_temp']):
+                tt = float(row['track_temp'])
+                if tt < 25: t.append("Track_Temp: < 25C")
+                elif tt <= 40: t.append("Track_Temp: 25-40C")
+                else: t.append("Track_Temp: > 40C")
+                
+            if pd.notna(row['classified_position']):
+                t.append("Podium Finish: True" if int(row['classified_position']) <= 3 else "Podium Finish: False")
+                
+            if pd.notna(row['points_scored']):
+                t.append("Points Scored: True" if float(row['points_scored']) > 0 else "Points Scored: False")
+                
+            if pd.notna(row['position_gain']):
+                t.append("Position Gained: True" if int(row['position_gain']) > 0 else "Position Gained: False")
+                
+            transactions.append(t)
+        
+        te = TransactionEncoder()
+        te_ary = te.fit(transactions).transform(transactions)
+        df_trans = pd.DataFrame(te_ary, columns=te.columns_)
+        
+        frequent_itemsets = fpgrowth(df_trans, min_support=min_supp, use_colnames=True)
+        if len(frequent_itemsets) == 0:
+             return pd.DataFrame(), "No frequent itemsets found. Lower minimum support."
+             
+        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_conf)
+        
+        if len(rules) == 0:
+            return pd.DataFrame(), "Found frequent itemsets, but no rules met the confidence threshold."
+            
+        rules["antecedents"] = rules["antecedents"].apply(lambda x: ', '.join(list(x)))
+        rules["consequents"] = rules["consequents"].apply(lambda x: ', '.join(list(x)))
+        
+        if target_metric != "None":
+            rules = rules[rules["consequents"].str.contains(target_metric, regex=False)]
+            
+        if len(rules) == 0:
+            return pd.DataFrame(), f"No rules found with consequent containing '{target_metric}'."
+        
+        rules = rules.sort_values('confidence', ascending=False)
+        return rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']].round(3), "✅ ARM executed successfully."
+        
+    except Exception as e:
+        return pd.DataFrame(), f"❌ ML Execution Error: {str(e)}"
+
+def run_clustering(n_clusters):
+    global con
+    if con is None:
+        return None, "❌ Database not connected!"
+        
+    try:
+        query = """
+            SELECT 
+                d.name as driver_name,
+                AVG(f.speed) as avg_speed,
+                AVG(f.throttle_pct) as avg_throttle,
+                AVG(f.rpm) as avg_rpm
+            FROM fact_telemetry f
+            JOIN fact_laps l ON f.lap_key = l.lap_key
+            JOIN dim_drivers d ON l.driver_key = d.driver_key
+            WHERE f.speed IS NOT NULL AND f.throttle_pct IS NOT NULL
+            GROUP BY d.name
+        """
+        df = con.sql(query).df().dropna()
+        if len(df) < n_clusters:
+            return gr.Plot(visible=False), "Not enough drivers with telemetry data to form requested clusters."
+            
+        X = df[['avg_speed', 'avg_throttle', 'avg_rpm']]
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
+        df['Cluster'] = kmeans.fit_predict(X).astype(str)
+        
+        fig = px.scatter_3d(df, x='avg_speed', y='avg_throttle', z='avg_rpm',
+                            color='Cluster', hover_name='driver_name', title="Driver Styles Clustering (Telemetry)")
+                            
+        return fig, "✅ KMeans clustered driver telemetry successfully."
+        
+    except Exception as e:
+        return gr.Plot(visible=False), f"❌ ML Execution Error: {str(e)}"
+
 with gr.Blocks(title="F1 OLAP Dashboard Analytics") as demo:
     gr.Markdown("# Formula 1 OLAP Engine 🏎️")
     
@@ -190,6 +317,33 @@ with gr.Blocks(title="F1 OLAP Dashboard Analytics") as demo:
 
             cube_radio.change(fn=update_cube_options, inputs=[cube_radio], outputs=[x_axis_dd, y_axis_dd, pivot_dd, slice_dim_dd, chart_type_dd, slice_val_txt])
             query_btn.click(fn=evaluate_olap_query, inputs=[cube_radio, x_axis_dd, y_axis_dd, pivot_dd, slice_dim_dd, slice_val_txt, agg_func_dd, chart_type_dd], outputs=[plot_output_1, plot_output_2, query_output])
+
+        with gr.Tab("Pattern Mining"):
+            gr.Markdown("### Discover Hidden Patterns via ML Algorithms")
+            with gr.Tabs():
+                with gr.Tab("Association Rule Mining (Market Basket)"):
+                    gr.Markdown("Find what factors lead to a personal best lap or other outcomes.")
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            target_metric_dd = gr.Dropdown(label="Target Consequent", choices=["None", "Personal Best: True", "Personal Best: False", "Rainfall: Yes", "Compound: SOFT"], value="Personal Best: True")
+                            min_supp_slider = gr.Slider(minimum=0.01, maximum=1.0, value=0.01, step=0.01, label="Minimum Support")
+                            min_conf_slider = gr.Slider(minimum=0.01, maximum=1.0, value=0.1, step=0.01, label="Minimum Confidence")
+                            run_arm_btn = gr.Button("Run FP-Growth", variant="primary")
+                        with gr.Column(scale=2):
+                            arm_output_msg = gr.Markdown("Status: Ready")
+                            arm_output_df = gr.Dataframe(interactive=False)
+                    run_arm_btn.click(fn=run_arm, inputs=[min_supp_slider, min_conf_slider, target_metric_dd], outputs=[arm_output_df, arm_output_msg])
+
+                with gr.Tab("Telemetry Clustering (Driver Styles)"):
+                    gr.Markdown("Group drivers implicitly based on their telemetry metrics (Speed, Throttle, RPM).")
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            k_clusters_slider = gr.Slider(minimum=2, maximum=10, value=3, step=1, label="Number of Clusters (K)")
+                            run_cluster_btn = gr.Button("Run K-Means", variant="primary")
+                        with gr.Column(scale=2):
+                            cluster_output_msg = gr.Markdown("Status: Ready")
+                            cluster_output_plot = gr.Plot()
+                    run_cluster_btn.click(fn=run_clustering, inputs=[k_clusters_slider], outputs=[cluster_output_plot, cluster_output_msg])
 
 if __name__ == "__main__":
     demo.launch()
