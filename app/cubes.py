@@ -77,7 +77,7 @@ def setup_cubes(con):
             lap_id as lap_key, 
             TRY_CAST(speed AS FLOAT) as speed, 
             TRY_CAST(rpm AS FLOAT) as rpm, 
-            TRY_CAST(throttle AS FLOAT) as throttle_pct, 
+            TRY_CAST(throttle AS FLOAT) as throttle_pct, TRY_CAST(brake AS BOOLEAN) as brake_applied, TRY_CAST(ngear AS INTEGER) as gear, 
             TRY_CAST(distance AS FLOAT) as distance_in_lap, 
             drs as drs_status
         FROM telemetry;

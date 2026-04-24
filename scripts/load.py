@@ -465,7 +465,7 @@ def load_event(year, event, session_num, load_telemetry_data=False):
 
 
 if __name__ == '__main__':
-    years = [2024]
+    years = [2022]
     for year in years:
         # Load all events for the year
         init_db(year=year)

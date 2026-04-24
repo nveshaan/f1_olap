@@ -250,36 +250,57 @@ def run_arm(min_supp, min_conf, target_metric):
     except Exception as e:
         return pd.DataFrame(), f"❌ ML Execution Error: {str(e)}"
 
-def run_clustering(n_clusters):
+def run_clustering(n_clusters, segment_type):
     global con
     if con is None:
         return None, "❌ Database not connected!"
         
     try:
-        query = """
-            SELECT 
-                d.name as driver_name,
-                AVG(f.speed) as avg_speed,
-                AVG(f.throttle_pct) as avg_throttle,
-                AVG(f.rpm) as avg_rpm
-            FROM fact_telemetry f
-            JOIN fact_laps l ON f.lap_key = l.lap_key
-            JOIN dim_drivers d ON l.driver_key = d.driver_key
-            WHERE f.speed IS NOT NULL AND f.throttle_pct IS NOT NULL
-            GROUP BY d.name
-        """
+        if segment_type == "Corners":
+            # Corners: brake timing (proxy: avg brake bool), downshift timing (avg gear), speed
+            query = f"""
+                SELECT 
+                    d.name as driver_name,
+                    AVG(CAST(f.brake_applied AS INTEGER)) as avg_brake,
+                    AVG(f.gear) as avg_gear,
+                    AVG(f.speed) as avg_speed
+                FROM fact_telemetry f
+                JOIN fact_laps l ON f.lap_key = l.lap_key
+                JOIN dim_drivers d ON l.driver_key = d.driver_key
+                WHERE f.speed < 200 AND f.throttle_pct < 50
+                GROUP BY d.name
+            """
+            axes = ['avg_brake', 'avg_gear', 'avg_speed']
+            title = "Driver Style: Corners (Brake, Gear, Speed)"
+        else:
+            # Straights: gear, speed, throttle
+            query = f"""
+                SELECT 
+                    d.name as driver_name,
+                    AVG(f.gear) as avg_gear,
+                    AVG(f.speed) as avg_speed,
+                    AVG(f.throttle_pct) as avg_throttle
+                FROM fact_telemetry f
+                JOIN fact_laps l ON f.lap_key = l.lap_key
+                JOIN dim_drivers d ON l.driver_key = d.driver_key
+                WHERE f.speed > 250 AND f.throttle_pct > 90
+                GROUP BY d.name
+            """
+            axes = ['avg_gear', 'avg_speed', 'avg_throttle']
+            title = "Driver Style: Straights (Gear, Speed, Throttle)"
+
         df = con.sql(query).df().dropna()
         if len(df) < n_clusters:
-            return gr.Plot(visible=False), "Not enough drivers with telemetry data to form requested clusters."
+            return gr.Plot(visible=False), f"Not enough drivers with {segment_type} telemetry data to form clusters."
             
-        X = df[['avg_speed', 'avg_throttle', 'avg_rpm']]
+        X = df[axes]
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
         df['Cluster'] = kmeans.fit_predict(X).astype(str)
         
-        fig = px.scatter_3d(df, x='avg_speed', y='avg_throttle', z='avg_rpm',
-                            color='Cluster', hover_name='driver_name', title="Driver Styles Clustering (Telemetry)")
+        fig = px.scatter_3d(df, x=axes[0], y=axes[1], z=axes[2],
+                            color='Cluster', hover_name='driver_name', title=title)
                             
-        return fig, "✅ KMeans clustered driver telemetry successfully."
+        return fig, f"✅ KMeans clustered {segment_type} telemetry successfully."
         
     except Exception as e:
         return gr.Plot(visible=False), f"❌ ML Execution Error: {str(e)}"
@@ -319,13 +340,12 @@ with gr.Blocks(title="F1 OLAP Dashboard Analytics") as demo:
             query_btn.click(fn=evaluate_olap_query, inputs=[cube_radio, x_axis_dd, y_axis_dd, pivot_dd, slice_dim_dd, slice_val_txt, agg_func_dd, chart_type_dd], outputs=[plot_output_1, plot_output_2, query_output])
 
         with gr.Tab("Pattern Mining"):
-            gr.Markdown("### Discover Hidden Patterns via ML Algorithms")
             with gr.Tabs():
                 with gr.Tab("Association Rule Mining (Market Basket)"):
                     gr.Markdown("Find what factors lead to a personal best lap or other outcomes.")
                     with gr.Row():
                         with gr.Column(scale=1):
-                            target_metric_dd = gr.Dropdown(label="Target Consequent", choices=["None", "Personal Best: True", "Personal Best: False", "Rainfall: Yes", "Compound: SOFT"], value="Personal Best: True")
+                            target_metric_dd = gr.Dropdown(label="Target Consequent", choices=["None", "Personal Best: True", "Podium Finish: True", "Points Scored: True", "Position Gained: True"], value="Personal Best: True")
                             min_supp_slider = gr.Slider(minimum=0.01, maximum=1.0, value=0.01, step=0.01, label="Minimum Support")
                             min_conf_slider = gr.Slider(minimum=0.01, maximum=1.0, value=0.1, step=0.01, label="Minimum Confidence")
                             run_arm_btn = gr.Button("Run FP-Growth", variant="primary")
@@ -335,15 +355,16 @@ with gr.Blocks(title="F1 OLAP Dashboard Analytics") as demo:
                     run_arm_btn.click(fn=run_arm, inputs=[min_supp_slider, min_conf_slider, target_metric_dd], outputs=[arm_output_df, arm_output_msg])
 
                 with gr.Tab("Telemetry Clustering (Driver Styles)"):
-                    gr.Markdown("Group drivers implicitly based on their telemetry metrics (Speed, Throttle, RPM).")
+                    gr.Markdown("Group drivers implicitly based on their telemetry metrics.")
                     with gr.Row():
                         with gr.Column(scale=1):
+                            segment_type_dd = gr.Dropdown(label="Race Segment", choices=["Corners", "Straights"], value="Corners")
                             k_clusters_slider = gr.Slider(minimum=2, maximum=10, value=3, step=1, label="Number of Clusters (K)")
                             run_cluster_btn = gr.Button("Run K-Means", variant="primary")
                         with gr.Column(scale=2):
                             cluster_output_msg = gr.Markdown("Status: Ready")
                             cluster_output_plot = gr.Plot()
-                    run_cluster_btn.click(fn=run_clustering, inputs=[k_clusters_slider], outputs=[cluster_output_plot, cluster_output_msg])
+                    run_cluster_btn.click(fn=run_clustering, inputs=[k_clusters_slider, segment_type_dd], outputs=[cluster_output_plot, cluster_output_msg])
 
 if __name__ == "__main__":
     demo.launch()
