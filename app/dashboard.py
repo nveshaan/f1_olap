@@ -277,7 +277,7 @@ def run_arm(min_supp, min_conf, target_metric, slice_dim, slice_val):
         if len(rules) == 0:
             return pd.DataFrame(), f"No rules found with consequent containing '{target_metric}'."
         
-        rules = rules.sort_values('confidence', ascending=False)
+        rules = rules.sort_values('lift', ascending=False)
         return rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']].round(3), "✅ ARM executed successfully."
         
     except Exception as e:
