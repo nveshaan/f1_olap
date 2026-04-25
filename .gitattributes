@@ -1,2 +1,4 @@
 assets/models/*.pkl filter=lfs diff=lfs merge=lfs -text
 assets/oltp.png filter=lfs diff=lfs merge=lfs -text
+assets/lap_tel_cube.png filter=lfs diff=lfs merge=lfs -text
+assets/rel_cube.png filter=lfs diff=lfs merge=lfs -text

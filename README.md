@@ -14,7 +14,7 @@ An interactive analytical dashboard for Formula 1 data, built with **Gradio**, *
 
 ## Hosting & Deployment
 
-This application is hosted on **Hugging Face Spaces**. It is automatically synced from this GitHub repository using GitHub Actions.
+This application is hosted on **Hugging Face Spaces** at [https://huggingface.co/spaces/nveshaan/f1_olap](https://huggingface.co/spaces/nveshaan/f1_olap). It is automatically synced from this GitHub repository using GitHub Actions.
 
 ## Deployment Setup
 
